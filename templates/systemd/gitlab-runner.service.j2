@@ -23,11 +23,7 @@ Type=simple
 Environment="HOME={{ devture_systemd_docker_base_systemd_unit_home_path }}"
 ExecStartPre={{ devture_systemd_docker_base_host_command_sh }} -c '{{ gitlab_runner_container_cleanup_command | trim | replace("\n", " ") }}'
 
-{#
-  The command is overridden, as the image's default one works in a directory `gitlab_runner_uid` cannot write to.
-  The metrics address is passed here rather than in `config.toml`, as GitLab Runner only reads it on startup.
-  SIGQUIT lets running jobs finish before the container stops.
-#}
+{# SIGQUIT lets running jobs finish before the container stops. #}
 ExecStartPre={{ devture_systemd_docker_base_host_command_docker }} create \
       --rm \
       --name={{ gitlab_runner_identifier }} \
@@ -40,17 +36,23 @@ ExecStartPre={{ devture_systemd_docker_base_host_command_docker }} create \
       --tmpfs=/tmp:rw,noexec,nosuid,size={{ gitlab_runner_container_tmp_size }} \
       --network={{ gitlab_runner_container_network }} \
       --stop-signal=SIGQUIT \
+      --env-file={{ gitlab_runner_base_path }}/env \
+      --label-file={{ gitlab_runner_base_path }}/labels \
       {% if gitlab_runner_config_metrics_enabled | bool and gitlab_runner_container_metrics_host_bind_port %}
       -p {{ gitlab_runner_container_metrics_host_bind_port }}:9252 \
       {% endif %}
       --mount type=bind,src={{ gitlab_runner_config_path }},dst=/etc/gitlab-runner \
       --mount type=bind,src={{ gitlab_runner_container_docker_socket_path_host }},dst=/var/run/docker.sock \
+      {% for volume in gitlab_runner_container_additional_volumes %}
+      --mount type={{ volume.type | default('bind' if '/' in volume.src else 'volume') }},src={{ volume.src }},dst={{ volume.dst }}{{ (',' + volume.options) if volume.options | default('') else '' }} \
+      {% endfor %}
       {% for arg in gitlab_runner_container_extra_arguments %}
       {{ arg }} \
       {% endfor %}
       {{ gitlab_runner_container_image }} \
-      run --config=/etc/gitlab-runner/config.toml --working-directory=/tmp{% if gitlab_runner_config_metrics_enabled | bool %} --listen-address=:9252{% endif %}
-
+      {% for arg in gitlab_runner_process_extra_arguments %}
+      {{ arg }} \
+      {% endfor %}
 
 {% for network in gitlab_runner_container_additional_networks %}
 ExecStartPre={{ devture_systemd_docker_base_host_command_docker }} network connect {{ network }} {{ gitlab_runner_identifier }}

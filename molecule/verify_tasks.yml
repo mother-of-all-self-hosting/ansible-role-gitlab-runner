@@ -123,7 +123,7 @@
     path: /var/run/docker.sock
   register: gitlab_runner_docker_socket
 
-- name: Assert that the GitLab Runner container runs unprivileged
+- name: Assert that the GitLab Runner container runs unprivileged, as configured
   vars:
     gitlab_runner_container: "{{ (gitlab_runner_container_inspect.stdout | from_json | first) }}"
   ansible.builtin.assert:
@@ -135,12 +135,22 @@
       - gitlab_runner_container.HostConfig.Privileged == false
       - gitlab_runner_container.HostConfig.ReadonlyRootfs == true
       - gitlab_runner_container.Config.StopSignal == 'SIGQUIT'
+      - "'MOLECULE_ENVIRONMENT_VARIABLE=1' in gitlab_runner_container.Config.Env"
+      - gitlab_runner_container.Config.Labels['molecule.label'] | default('') == '1'
+      - gitlab_runner_container.Mounts | selectattr('Destination', 'equalto', '/molecule/hostname') | map(attribute='RW') | list == [false]
+      - gitlab_runner_container.NetworkSettings.Networks.keys() | sort == ['gitlab-runner', 'molecule']
+      - gitlab_runner_container.Config.Cmd[:3] == ['run', '--config=/etc/gitlab-runner/config.toml', '--working-directory=/tmp']
+      - "'--listen-address=:9252' in gitlab_runner_container.Config.Cmd"
     fail_msg: >-
       The container runs as {{ gitlab_runner_container.Config.User }} (groups: {{ gitlab_runner_container.HostConfig.GroupAdd }}),
       with capabilities dropped: {{ gitlab_runner_container.HostConfig.CapDrop }}, added: {{ gitlab_runner_container.HostConfig.CapAdd }},
       privileged: {{ gitlab_runner_container.HostConfig.Privileged }}, read-only: {{ gitlab_runner_container.HostConfig.ReadonlyRootfs }},
-      stop signal: {{ gitlab_runner_container.Config.StopSignal }}
-    success_msg: "The container runs as {{ gitlab_runner_uid }}:{{ gitlab_runner_gid }} with the Docker socket's group, no capabilities and a read-only filesystem"
+      stop signal: {{ gitlab_runner_container.Config.StopSignal }}, environment: {{ gitlab_runner_container.Config.Env }},
+      labels: {{ gitlab_runner_container.Config.Labels }}, mounts: {{ gitlab_runner_container.Mounts | map(attribute='Destination') | list }},
+      networks: {{ gitlab_runner_container.NetworkSettings.Networks.keys() | list }}, arguments: {{ gitlab_runner_container.Config.Cmd }}
+    success_msg: >-
+      The container runs as {{ gitlab_runner_uid }}:{{ gitlab_runner_gid }} with the Docker socket's group, no capabilities and a read-only filesystem,
+      with the configured environment variables, labels, volumes, networks and arguments
 
 # The runner only uses the Docker socket when it runs a job, which needs a GitLab instance.
 # So this checks that the runner's user can use the socket, with the same `curl` requests as Docker's own API client.

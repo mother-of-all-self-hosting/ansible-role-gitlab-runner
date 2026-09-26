@@ -1,0 +1,12 @@
+{#
+SPDX-FileCopyrightText: 2026 spatterlight
+
+SPDX-License-Identifier: AGPL-3.0-or-later
+#}
+
+{#
+  GitLab Runner has no web interface, so no labels for a reverse-proxy (e.g. Traefik) are emitted.
+#}
+{% for arg in gitlab_runner_container_labels_additional_labels %}
+{{ arg }}
+{% endfor %}

@@ -39,6 +39,18 @@ provisioner:
         gitlab_runner_gid: 1000
         gitlab_runner_config_metrics_enabled: true
         gitlab_runner_container_metrics_host_bind_port: "127.0.0.1:9252"
+        gitlab_runner_environment_variables_additional_variables: |
+          MOLECULE_ENVIRONMENT_VARIABLE=1
+        gitlab_runner_container_labels_additional_labels_custom:
+          - molecule.label=1
+        gitlab_runner_container_additional_volumes_custom:
+          - type: bind
+            src: /etc/hostname
+            dst: /molecule/hostname
+            options: readonly
+        # Listed twice, to check that the role connects it only once
+        gitlab_runner_container_additional_networks_default: [molecule]
+        gitlab_runner_container_additional_networks_custom: [molecule]
 
         # There is no GitLab instance in this scenario, so the runners keep failing to ask it for jobs.
         # Everything else about them (the configuration, the Docker socket, the metrics) can be verified regardless.

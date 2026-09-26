@@ -102,6 +102,32 @@ GitLab Runner reloads `config.toml` on its own when it changes. So changing thes
 >[!NOTE]
 > Paths in `config.toml` (e.g. bind mounts in `docker_volumes`) refer to the host, because the job containers are started by the host's Docker daemon.
 
+### Using a proxy or a custom certificate authority (optional)
+
+Environment variables for GitLab Runner itself (not for its jobs, which get a runner's `environment`) go into `gitlab_runner_environment_variables_additional_variables`, and files are mounted into its container with `gitlab_runner_container_additional_volumes_custom`.
+
+For example, to reach GitLab through a proxy, and trust the certificate authority that signed GitLab's certificate:
+
+```yaml
+gitlab_runner_environment_variables_additional_variables: |
+  HTTPS_PROXY=http://proxy.example.com:3128
+  NO_PROXY=localhost,127.0.0.1
+
+gitlab_runner_container_additional_volumes_custom:
+  - type: bind
+    src: /path/to/ca.crt
+    dst: /certs/ca.crt
+    options: readonly
+
+gitlab_runner_runners:
+  - name: docker
+    token: YOUR_RUNNER_AUTHENTICATION_TOKEN_HERE
+    configuration_extension_toml: |
+      tls-ca-file = "/certs/ca.crt"
+```
+
+Do not mount the certificate at `/etc/gitlab-runner/certs/ca.crt`, where the image's startup script would try to install it system-wide, which the runner's unprivileged user cannot do.
+
 ### Building container images in jobs (Docker-in-Docker)
 
 Jobs that build container images with a [`docker:dind` service](https://docs.gitlab.com/ci/docker/using_docker_build/#use-docker-in-docker) need a runner with privileged containers:
