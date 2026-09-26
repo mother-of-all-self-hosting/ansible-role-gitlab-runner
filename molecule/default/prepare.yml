@@ -35,3 +35,10 @@
             {'storage-driver': 'fuse-overlayfs'}
             | combine({'registry-mirrors': [lookup('ansible.builtin.env', 'MOLECULE_DOCKER_REGISTRY_MIRROR')]} if lookup('ansible.builtin.env', 'MOLECULE_DOCKER_REGISTRY_MIRROR') else {})
           }}
+
+    - name: Ensure the additional container network exists for GitLab Runner Molecule tests
+      ansible.builtin.command:
+        cmd: docker network create molecule
+      register: gitlab_runner_molecule_network
+      changed_when: gitlab_runner_molecule_network.rc == 0
+      failed_when: gitlab_runner_molecule_network.rc != 0 and 'already exists' not in gitlab_runner_molecule_network.stderr
