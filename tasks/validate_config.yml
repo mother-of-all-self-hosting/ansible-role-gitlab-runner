@@ -1,0 +1,67 @@
+# SPDX-FileCopyrightText: 2023 Slavi Pantaleev
+# SPDX-FileCopyrightText: 2026 spatterlight
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+---
+- name: Fail if required GitLab Runner settings not defined
+  ansible.builtin.fail:
+    msg: >-
+      You need to define a required configuration setting (`{{ item }}`).
+  when: "lookup('vars', item, default='') | string | length == 0"
+  with_items:
+    - gitlab_runner_uid
+    - gitlab_runner_gid
+    - gitlab_runner_container_network
+    - gitlab_runner_container_docker_socket_path_host
+
+- name: Fail if no GitLab runners are defined
+  ansible.builtin.fail:
+    msg: >-
+      You need to define at least one runner in `gitlab_runner_runners`.
+  when: gitlab_runner_runners | length == 0
+
+- name: Fail if a GitLab runner is missing a required setting
+  ansible.builtin.fail:
+    msg: >-
+      Runner #{{ runner_index + 1 }} in `gitlab_runner_runners` needs a non-empty `name`, `token` and `url`
+      (`url` defaults to `gitlab_runner_config_gitlab_url`).
+  when: >-
+    item.name | default('') | string | length == 0
+    or item.token | default('') | string | length == 0
+    or item.url | default(gitlab_runner_config_gitlab_url) | string | length == 0
+  loop: "{{ gitlab_runner_runners }}"
+  loop_control:
+    label: "{{ item.name | default('#' ~ (runner_index + 1)) }}"
+    index_var: runner_index
+
+- name: Fail if GitLab runner names are not unique
+  ansible.builtin.fail:
+    msg: >-
+      The names of the runners in `gitlab_runner_runners` must be unique.
+  when: "(gitlab_runner_runners | map(attribute='name') | unique | length) != (gitlab_runner_runners | length)"
+
+# A registration token (`GR1348941...`) is what `gitlab-runner register` exchanges for a runner token.
+# This role writes the runner token into `config.toml` directly instead.
+- name: Fail if a GitLab runner is given a registration token
+  ansible.builtin.fail:
+    msg: >-
+      The token of runner `{{ item.name }}` is a registration token, which this role does not support.
+      Create the runner in GitLab instead (e.g. Admin area > CI/CD > Runners > New instance runner),
+      and use the runner authentication token (`glrt-...`) GitLab shows for it.
+  when: "item.token is match('GR1348941')"
+  loop: "{{ gitlab_runner_runners }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Fail if the GitLab Runner log level is invalid
+  ansible.builtin.fail:
+    msg: >-
+      gitlab_runner_config_log_level must be one of: debug, info, warn, error, fatal, panic
+  when: "gitlab_runner_config_log_level not in ['debug', 'info', 'warn', 'error', 'fatal', 'panic']"
+
+- name: Fail if the GitLab Runner log format is invalid
+  ansible.builtin.fail:
+    msg: >-
+      gitlab_runner_config_log_format must be one of: runner, text, json
+  when: "gitlab_runner_config_log_format not in ['runner', 'text', 'json']"

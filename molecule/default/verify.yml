@@ -1,0 +1,32 @@
+# SPDX-FileCopyrightText: 2026 Slavi Pantaleev
+# SPDX-FileCopyrightText: 2026 spatterlight
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+---
+- name: Verify GitLab Runner
+  hosts: all
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Verify that GitLab Runner works
+      block:
+        - name: Run the shared GitLab Runner verification
+          ansible.builtin.include_tasks: "{{ lookup('env', 'MOLECULE_PROJECT_DIRECTORY') }}/molecule/verify_tasks.yml"
+
+      rescue:
+        # Whatever went wrong, the reason is almost always in the systemd service log.
+        - name: Retrieve the GitLab Runner systemd service log
+          ansible.builtin.command:
+            cmd: journalctl --no-pager --output=cat --lines=200 --unit=gitlab-runner.service
+          register: gitlab_runner_service_log
+          changed_when: false
+
+        - name: Show the GitLab Runner systemd service log
+          ansible.builtin.debug:
+            var: gitlab_runner_service_log.stdout_lines
+
+        - name: Fail because verification did not pass
+          ansible.builtin.fail:
+            msg: "GitLab Runner verification failed. The systemd service log is printed above."

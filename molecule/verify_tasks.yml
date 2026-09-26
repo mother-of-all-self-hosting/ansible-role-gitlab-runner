@@ -1,0 +1,240 @@
+# SPDX-FileCopyrightText: 2026 Slavi Pantaleev
+# SPDX-FileCopyrightText: 2026 spatterlight
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+---
+# The role is not included in this playbook, so its defaults are read directly
+# (e.g. for the version the role pins).
+- name: Load the role defaults
+  ansible.builtin.include_vars:
+    file: "{{ lookup('env', 'MOLECULE_PROJECT_DIRECTORY') }}/defaults/main.yml"
+    name: gitlab_runner_defaults
+
+- name: Wait for the GitLab Runner systemd service to become active (up to 180s)
+  ansible.builtin.systemd_service:
+    name: gitlab-runner.service
+  register: gitlab_runner_service
+  until: gitlab_runner_service.status.ActiveState == 'active'
+  retries: 36
+  delay: 5
+  # So that giving up is reported by the assertion below rather than as a
+  # wall of systemd unit properties.
+  failed_when: false
+
+# The unit is `Restart=always`, so even a crash-looping container reads as active here.
+# This is a precondition, not a result.
+- name: Assert the GitLab Runner systemd service is active
+  ansible.builtin.assert:
+    that: gitlab_runner_service.status.ActiveState == 'active'
+    fail_msg: "gitlab-runner.service is {{ gitlab_runner_service.status.ActiveState }}"
+    success_msg: "gitlab-runner.service is active"
+
+- name: Retrieve the GitLab Runner systemd service log for debugging
+  when: gitlab_runner_debug_service_enabled | bool
+  ansible.builtin.command:
+    cmd: journalctl --no-pager --output=cat --unit=gitlab-runner.service
+  changed_when: false
+
+# The metrics are only served once GitLab Runner has loaded `config.toml`,
+# so this separates "still starting" from "never loading its configuration".
+- name: Wait for the GitLab Runner metrics endpoint to respond (up to 60s)
+  ansible.builtin.uri:
+    url: "http://{{ gitlab_runner_container_metrics_host_bind_port }}/metrics"
+    return_content: true
+    status_code: [200, -1]
+  register: gitlab_runner_metrics
+  until: gitlab_runner_metrics.status == 200
+  retries: 12
+  delay: 5
+  failed_when: false
+
+- name: Assert that GitLab Runner serves metrics
+  ansible.builtin.assert:
+    that: gitlab_runner_metrics.status == 200
+    fail_msg: "GitLab Runner did not serve its metrics (got {{ gitlab_runner_metrics.status | default('no response') }})"
+    success_msg: "GitLab Runner serves its metrics"
+
+- name: Assert that the running GitLab Runner is the version this role installs, on the role's configuration
+  ansible.builtin.assert:
+    that:
+      - gitlab_runner_metrics.content is search('gitlab_runner_version_info\{[^}]*version="' ~ gitlab_runner_defaults.gitlab_runner_version ~ '"')
+      - gitlab_runner_metrics.content is search('(?m)^gitlab_runner_concurrent ' ~ gitlab_runner_defaults.gitlab_runner_config_concurrent ~ '$')
+    fail_msg: >-
+      GitLab Runner reports {{ gitlab_runner_metrics.content | regex_findall('gitlab_runner_version_info\{[^}]*\}') }}
+      and {{ gitlab_runner_metrics.content | regex_findall('(?m)^gitlab_runner_concurrent .*$') }},
+      expected version {{ gitlab_runner_defaults.gitlab_runner_version }} and concurrent {{ gitlab_runner_defaults.gitlab_runner_config_concurrent }}
+    success_msg: "GitLab Runner {{ gitlab_runner_defaults.gitlab_runner_version }} runs on the role's configuration"
+
+# The scenario leaves `gitlab_runner_identifier` at its default, so the base path is /gitlab-runner.
+# It contains the runner authentication tokens, so nobody but the runner's user may read it.
+- name: Check the GitLab Runner configuration file
+  ansible.builtin.stat:
+    path: /gitlab-runner/config/config.toml
+  register: gitlab_runner_config_file
+
+- name: Assert that the GitLab Runner configuration file is only readable by the runner's user
+  ansible.builtin.assert:
+    that:
+      - gitlab_runner_config_file.stat.exists
+      - gitlab_runner_config_file.stat.uid == gitlab_runner_uid
+      - gitlab_runner_config_file.stat.mode == '0600'
+    fail_msg: "config.toml is {{ gitlab_runner_config_file.stat.uid | default('?') }}:{{ gitlab_runner_config_file.stat.mode | default('?') }}, expected {{ gitlab_runner_uid }}:0600"
+    success_msg: "config.toml is only readable by the runner's user"
+
+# The scenario's runner names and settings contain characters (`"` and `\`) which break TOML unless the role escapes them.
+- name: Parse the GitLab Runner configuration file
+  ansible.builtin.command:
+    cmd: >-
+      python3 -c 'import json, sys, tomllib; print(json.dumps(tomllib.load(open(sys.argv[1], "rb"))))'
+      /gitlab-runner/config/config.toml
+  register: gitlab_runner_config_parsed
+  changed_when: false
+
+- name: Assert that the GitLab Runner configuration file holds the configured runners
+  vars:
+    gitlab_runner_config: "{{ gitlab_runner_config_parsed.stdout | from_json }}"
+  ansible.builtin.assert:
+    that:
+      - gitlab_runner_config.runners | map(attribute='name') | list == gitlab_runner_runners | map(attribute='name') | list
+      - gitlab_runner_config.runners | map(attribute='token') | list == gitlab_runner_runners | map(attribute='token') | list
+      - gitlab_runner_config.runners | map(attribute='executor') | unique | list == ['docker']
+      - gitlab_runner_config.runners[0].docker.privileged == false
+      - gitlab_runner_config.runners[0].docker.volumes == ['/cache']
+      - gitlab_runner_config.runners[1].limit == 1
+      - gitlab_runner_config.runners[1].output_limit == 8192
+      - gitlab_runner_config.runners[1].docker.output_limit is not defined
+      - gitlab_runner_config.runners[1].environment == ['FOO=bar']
+      - gitlab_runner_config.runners[1].docker.privileged == true
+      - gitlab_runner_config.runners[1].docker.network_mode == 'host'
+      - gitlab_runner_config.runners[1].docker.pull_policy == ['if-not-present']
+      - gitlab_runner_config.runners[1].cache.MaxUploadedArchiveSize == 0
+    fail_msg: "config.toml does not hold what the scenario configured: {{ gitlab_runner_config }}"
+    success_msg: "config.toml holds the configured runners"
+
+- name: Inspect the GitLab Runner container
+  ansible.builtin.command:
+    cmd: docker container inspect gitlab-runner
+  register: gitlab_runner_container_inspect
+  changed_when: false
+
+- name: Check the Docker socket
+  ansible.builtin.stat:
+    path: /var/run/docker.sock
+  register: gitlab_runner_docker_socket
+
+- name: Assert that the GitLab Runner container runs unprivileged
+  vars:
+    gitlab_runner_container: "{{ (gitlab_runner_container_inspect.stdout | from_json | first) }}"
+  ansible.builtin.assert:
+    that:
+      - gitlab_runner_container.Config.User == gitlab_runner_uid ~ ':' ~ gitlab_runner_gid
+      - gitlab_runner_container.HostConfig.GroupAdd == [gitlab_runner_docker_socket.stat.gid | string]
+      - gitlab_runner_container.HostConfig.CapDrop == ['ALL']
+      - gitlab_runner_container.HostConfig.CapAdd is none
+      - gitlab_runner_container.HostConfig.Privileged == false
+      - gitlab_runner_container.HostConfig.ReadonlyRootfs == true
+      - gitlab_runner_container.Config.StopSignal == 'SIGQUIT'
+    fail_msg: >-
+      The container runs as {{ gitlab_runner_container.Config.User }} (groups: {{ gitlab_runner_container.HostConfig.GroupAdd }}),
+      with capabilities dropped: {{ gitlab_runner_container.HostConfig.CapDrop }}, added: {{ gitlab_runner_container.HostConfig.CapAdd }},
+      privileged: {{ gitlab_runner_container.HostConfig.Privileged }}, read-only: {{ gitlab_runner_container.HostConfig.ReadonlyRootfs }},
+      stop signal: {{ gitlab_runner_container.Config.StopSignal }}
+    success_msg: "The container runs as {{ gitlab_runner_uid }}:{{ gitlab_runner_gid }} with the Docker socket's group, no capabilities and a read-only filesystem"
+
+# The runner only uses the Docker socket when it runs a job, which needs a GitLab instance.
+# So this checks that the runner's user can use the socket, with the same `curl` requests as Docker's own API client.
+- name: Query the Docker daemon from inside the GitLab Runner container
+  ansible.builtin.command:
+    cmd: docker exec gitlab-runner curl --silent --fail --unix-socket /var/run/docker.sock http://docker/version
+  register: gitlab_runner_docker_version
+  changed_when: false
+  failed_when: false
+
+- name: Assert that GitLab Runner can use the Docker socket
+  ansible.builtin.assert:
+    that:
+      - gitlab_runner_docker_version.rc == 0
+      - (gitlab_runner_docker_version.stdout | from_json).ApiVersion is defined
+    fail_msg: "The runner's user cannot use the Docker socket: {{ gitlab_runner_docker_version.stderr | default('') }} (exit code {{ gitlab_runner_docker_version.rc }})"
+    success_msg: "GitLab Runner can use the Docker socket"
+
+# The role does not restart the container when only `config.toml` changes, because GitLab Runner reloads it on its own.
+# This makes sure that it still does.
+- name: Verify that GitLab Runner reloads its configuration on its own
+  block:
+    - name: Sample the restart counter before changing the configuration
+      ansible.builtin.systemd_service:
+        name: gitlab-runner.service
+      register: gitlab_runner_reload_before
+
+    - name: Change the concurrency in the GitLab Runner configuration file
+      ansible.builtin.lineinfile:
+        path: /gitlab-runner/config/config.toml
+        regexp: '^concurrent = '
+        line: concurrent = 17
+
+    - name: Wait for GitLab Runner to report the changed concurrency (up to 60s)
+      ansible.builtin.uri:
+        url: "http://{{ gitlab_runner_container_metrics_host_bind_port }}/metrics"
+        return_content: true
+      register: gitlab_runner_reload_metrics
+      until: gitlab_runner_reload_metrics.content is search('(?m)^gitlab_runner_concurrent 17$')
+      retries: 12
+      delay: 5
+      failed_when: false
+
+    - name: Sample the restart counter after changing the configuration
+      ansible.builtin.systemd_service:
+        name: gitlab-runner.service
+      register: gitlab_runner_reload_after
+
+    - name: Assert that GitLab Runner reloaded its configuration without restarting
+      ansible.builtin.assert:
+        that:
+          - gitlab_runner_reload_metrics.content | default('') is search('(?m)^gitlab_runner_concurrent 17$')
+          - gitlab_runner_reload_after.status.NRestarts == gitlab_runner_reload_before.status.NRestarts
+          - gitlab_runner_reload_after.status.ExecMainPID == gitlab_runner_reload_before.status.ExecMainPID
+        fail_msg: >-
+          GitLab Runner reports {{ gitlab_runner_reload_metrics.content | default('') | regex_findall('(?m)^gitlab_runner_concurrent .*$') }}
+          after `concurrent` was changed to 17 (restarts: {{ gitlab_runner_reload_before.status.NRestarts }} before,
+          {{ gitlab_runner_reload_after.status.NRestarts }} after)
+        success_msg: "GitLab Runner reloaded its configuration without restarting"
+
+  always:
+    - name: Restore the concurrency in the GitLab Runner configuration file
+      ansible.builtin.lineinfile:
+        path: /gitlab-runner/config/config.toml
+        regexp: '^concurrent = '
+        line: "concurrent = {{ gitlab_runner_defaults.gitlab_runner_config_concurrent }}"
+
+- name: Verify nothing was quietly restarting while all of that was being checked
+  when: "gitlab_runner_restarts_check_enabled | bool"
+  block:
+    # `Restart=always` means the unit reads `active` while crash-looping,
+    # so this watches it with everything already answering.
+    - name: Sample the restart counter
+      ansible.builtin.systemd_service:
+        name: gitlab-runner.service
+      register: gitlab_runner_restarts_before
+
+    # Comfortably longer than the unit's `RestartSec=30`, so a crash loop has to
+    # tick at least once inside the window.
+    - name: Watch the service for 45 seconds
+      ansible.builtin.pause:
+        seconds: 45
+
+    - name: Sample the restart counter again
+      ansible.builtin.systemd_service:
+        name: gitlab-runner.service
+      register: gitlab_runner_restarts_after
+
+    - name: Assert the service did not restart while it was up
+      ansible.builtin.assert:
+        that:
+          - gitlab_runner_restarts_after.status.NRestarts == gitlab_runner_restarts_before.status.NRestarts
+          - gitlab_runner_restarts_after.status.ActiveState == 'active'
+        fail_msg: >-
+          The service restarted while it was supposedly up ({{ gitlab_runner_restarts_before.status.NRestarts }} restarts before,
+          {{ gitlab_runner_restarts_after.status.NRestarts }} after), so `active` was hiding a crash loop.
+        success_msg: "The service did not restart over 45 seconds of watching ({{ gitlab_runner_restarts_after.status.NRestarts }} restarts so far)"

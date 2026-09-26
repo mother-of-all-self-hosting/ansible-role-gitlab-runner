@@ -1,0 +1,19 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": [
+    "Patch releases of GitLab Runner are automerged once CI is green.",
+    "Minor and major releases need a human review - see docs/configuring-gitlab-runner.md for keeping GitLab Runner in sync with GitLab."
+  ],
+  "extends": [
+    "github>mother-of-all-self-hosting/renovate-config#v1.1.0",
+    "github>mother-of-all-self-hosting/renovate-config//patch-automerge#v1.1.0"
+  ],
+  "packageRules": [
+    {
+      "description": "GitLab Runner's image tags carry a `v` prefix (e.g. `v19.4.1`), while `gitlab_runner_version` only holds the version itself (e.g. `19.4.1`).",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["gitlab/gitlab-runner"],
+      "extractVersion": "^v(?<version>\\d+\\.\\d+\\.\\d+)$"
+    }
+  ]
+}

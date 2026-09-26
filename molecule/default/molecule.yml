@@ -1,0 +1,65 @@
+# SPDX-FileCopyrightText: 2026 Slavi Pantaleev
+# SPDX-FileCopyrightText: 2026 spatterlight
+# SPDX-FileCopyrightText: 2026 Suguru Hirahara
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+---
+dependency:
+  name: galaxy
+  options:
+    requirements-file: requirements.yml
+    force: true
+driver:
+  name: docker
+platforms:
+  - name: gitlab-runner-${MOLECULE_DISTRO:-ubuntu2604}-default
+    image: "geerlingguy/docker-${MOLECULE_DISTRO:-ubuntu2604}-ansible:latest"
+    command: ${MOLECULE_DOCKER_COMMAND:-""}
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    cgroupns_mode: host
+    # Also gives the inner Docker the /dev/fuse which fuse-overlayfs needs (see prepare.yml).
+    privileged: true
+    pre_build_image: true
+provisioner:
+  name: ansible
+  config_options:
+    defaults:
+      callback_result_format: yaml
+  inventory:
+    group_vars:
+      all:
+        # Helper variables
+        gitlab_runner_debug_service_enabled: false
+        gitlab_runner_restarts_check_enabled: true
+
+        # Variables for GitLab Runner
+        gitlab_runner_uid: 1000
+        gitlab_runner_gid: 1000
+        gitlab_runner_config_metrics_enabled: true
+        gitlab_runner_container_metrics_host_bind_port: "127.0.0.1:9252"
+
+        # There is no GitLab instance in this scenario, so the runners keep failing to ask it for jobs.
+        # Everything else about them (the configuration, the Docker socket, the metrics) can be verified regardless.
+        gitlab_runner_config_gitlab_url: http://gitlab.invalid
+        gitlab_runner_runners:
+          - name: molecule-default
+            token: glrt-molecule-not-a-real-token-1
+          - name: "molecule \"quoted\" \\ privileged 🚀"
+            token: glrt-molecule-not-a-real-token-2
+            limit: 1
+            environment: ["FOO=bar"]
+            docker_privileged: true
+            docker_network_mode: host
+            docker_configuration_extension_toml: |
+              pull_policy = ["if-not-present"]
+            configuration_extension_toml: |
+              output_limit = 8192
+              [runners.cache]
+                MaxUploadedArchiveSize = 0
+  env:
+    # Workaround for https://github.com/ansible/molecule/issues/4391
+    ANSIBLE_ROLES_PATH: ${MOLECULE_PROJECT_DIRECTORY}/..:/.ansible/roles:/usr/share/ansible/roles:/etc/ansible/roles:~/.ansible/roles
+verifier:
+  name: ansible
