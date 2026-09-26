@@ -24,15 +24,8 @@ Environment="HOME={{ devture_systemd_docker_base_systemd_unit_home_path }}"
 ExecStartPre={{ devture_systemd_docker_base_host_command_sh }} -c '{{ gitlab_runner_container_cleanup_command | trim | replace("\n", " ") }}'
 
 {#
-  The runner only talks to GitLab and to the Docker daemon (via its socket), so it runs as an unprivileged user,
-  without any capabilities and with a read-only filesystem. The group that owns the Docker socket lets it use the socket,
-  which is equivalent to `root` access on the host: the containers of its jobs are started next to this one,
-  by the host's Docker daemon.
-
-  The image's default command runs as the `gitlab-runner` user of the image, and works in its home directory,
-  which is not writable for `gitlab_runner_uid`. Neither is needed with the Docker executor.
-
-  On SIGQUIT, GitLab Runner stops picking up new jobs and waits for the running ones to finish.
+  The command is overridden, as the image's default one works in a directory `gitlab_runner_uid` cannot write to.
+  SIGQUIT lets running jobs finish before the container stops.
 #}
 ExecStartPre={{ devture_systemd_docker_base_host_command_docker }} create \
       --rm \
