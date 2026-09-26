@@ -102,6 +102,8 @@
       - gitlab_runner_config.runners[0].docker.privileged == false
       - gitlab_runner_config.runners[0].docker.volumes == ['/cache']
       - gitlab_runner_config.runners[1].limit == 1
+      - gitlab_runner_config.runners[1].output_limit == 8192
+      - gitlab_runner_config.runners[1].docker.output_limit is not defined
       - gitlab_runner_config.runners[1].environment == ['FOO=bar']
       - gitlab_runner_config.runners[1].docker.privileged == true
       - gitlab_runner_config.runners[1].docker.network_mode == 'host'

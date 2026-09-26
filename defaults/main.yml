@@ -61,6 +61,11 @@ gitlab_runner_container_docker_socket_path_host: /var/run/docker.sock
 # If empty, it's the group that owns `gitlab_runner_container_docker_socket_path_host`, as found while installing.
 gitlab_runner_container_docker_socket_gid: ""
 
+# The size of the container's `/tmp` (a tmpfs, so it uses memory as it fills up).
+# GitLab Runner buffers the log of each running job in there, up to the runner's `output_limit` (4 MiB by default),
+# so it needs to hold `gitlab_runner_config_concurrent` of them.
+gitlab_runner_container_tmp_size: 512m
+
 # Specify how the container publishes GitLab Runner's Prometheus metrics endpoint (tcp/9252 in the container).
 # Only relevant if `gitlab_runner_config_metrics_enabled` is `true`.
 #
@@ -148,6 +153,8 @@ gitlab_runner_config_log_level: info
 gitlab_runner_config_log_format: runner
 
 # Controls whether GitLab Runner serves Prometheus metrics (on tcp/9252 in the container).
+# Unlike the other settings here, it's passed on the command line (GitLab Runner only reads it on startup),
+# so changing it restarts the container.
 # See `gitlab_runner_container_metrics_host_bind_port` for exposing them.
 gitlab_runner_config_metrics_enabled: false
 
@@ -180,7 +187,8 @@ gitlab_runner_config_metrics_enabled: false
 #     docker_network_mode: ""
 #     # Additional TOML settings for the runner's `[runners.docker]` section, e.g. `pull_policy = ["if-not-present"]`
 #     docker_configuration_extension_toml: ""
-#     # Additional TOML appended to the end of the runner's `[[runners]]` section, e.g. a `[runners.cache]` section
+#     # Additional TOML for the runner's `[[runners]]` section (before its `[runners.docker]` section),
+#     # e.g. `output_limit = 16384` or a `[runners.cache]` section. Plain keys must come before any section in it.
 #     configuration_extension_toml: ""
 gitlab_runner_runners: []
 

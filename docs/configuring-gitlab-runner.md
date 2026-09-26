@@ -35,6 +35,9 @@ GitLab then shows the runner's authentication token, which starts with `glrt-`. 
 
 Registration tokens (which start with `GR1348941`) are deprecated by GitLab and not supported by this role.
 
+>[!NOTE]
+> If your GitLab instance sets an expiration for runner authentication tokens, GitLab Runner does not rotate the tokens this role configures, as `config.toml` does not record when they expire. Create a new token for the runner in GitLab before the old one expires, and update `gitlab_runner_runners`.
+
 ## Adjusting the playbook configuration
 
 To enable GitLab Runner, add the following configuration to your `vars.yml` file (e.g. `inventory/host_vars/mash.example.com/vars.yml` with the [MASH playbook](https://github.com/mother-of-all-self-hosting/mash-playbook)):
@@ -65,13 +68,15 @@ Each item of `gitlab_runner_runners` is a runner, which can override `url` and a
 
 The number of jobs that run at the same time, across all runners, is limited by `gitlab_runner_config_concurrent` (default: `4`).
 
+GitLab Runner buffers the log of each running job in its container's `/tmp`, which holds 512 MB (`gitlab_runner_container_tmp_size`). That is enough for 128 jobs at the default `output_limit` of 4 MB. If `gitlab_runner_config_concurrent` times `output_limit` gets close to it, raise `gitlab_runner_container_tmp_size`.
+
 ### Adding other settings
 
 GitLab Runner has [many more settings](https://docs.gitlab.com/runner/configuration/advanced-configuration/). To add them, use:
 
 - `gitlab_runner_configuration_extension_toml` for the global section
 - a runner's `docker_configuration_extension_toml` for its `[runners.docker]` section
-- a runner's `configuration_extension_toml` for other sections of the runner (e.g. `[runners.cache]`)
+- a runner's `configuration_extension_toml` for the runner itself (e.g. `output_limit`), and for its other sections (e.g. `[runners.cache]`). Plain keys must come before any section.
 
 For example:
 
@@ -83,6 +88,7 @@ gitlab_runner_runners:
       pull_policy = ["always", "if-not-present"]
       allowed_images = ["alpine:*", "python:*"]
     configuration_extension_toml: |
+      output_limit = 16384
       [runners.cache]
         Type = "s3"
         Shared = true
@@ -171,6 +177,6 @@ Run `journalctl -fu gitlab-runner` on the server (or the name of your service, e
 ### List and verify the configured runners
 
 ```sh
-docker exec gitlab-runner gitlab-runner list
-docker exec gitlab-runner gitlab-runner verify
+docker exec gitlab-runner gitlab-runner list --config /etc/gitlab-runner/config.toml
+docker exec gitlab-runner gitlab-runner verify --config /etc/gitlab-runner/config.toml
 ```

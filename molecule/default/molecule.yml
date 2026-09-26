@@ -46,7 +46,7 @@ provisioner:
         gitlab_runner_runners:
           - name: molecule-default
             token: glrt-molecule-not-a-real-token-1
-          - name: "molecule \"quoted\" \\ privileged"
+          - name: "molecule \"quoted\" \\ privileged 🚀"
             token: glrt-molecule-not-a-real-token-2
             limit: 1
             environment: ["FOO=bar"]
@@ -55,6 +55,7 @@ provisioner:
             docker_configuration_extension_toml: |
               pull_policy = ["if-not-present"]
             configuration_extension_toml: |
+              output_limit = 8192
               [runners.cache]
                 MaxUploadedArchiveSize = 0
   env:

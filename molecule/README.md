@@ -47,7 +47,7 @@ Currently these testing scenarios are available:
 
 ### `default`
 
-Installs GitLab Runner with two runners: one with the role's defaults, and one with most of the per-runner settings in use. Its name contains characters (`"` and `\`) which break `config.toml` unless the role escapes them.
+Installs GitLab Runner with two runners: one with the role's defaults, and one with most of the per-runner settings in use. Its name contains characters (`"`, `\` and an emoji) which break `config.toml` unless the role escapes them.
 
 There is no GitLab instance in this scenario, so the runners cannot pick up any jobs.
 

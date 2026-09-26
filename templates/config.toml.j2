@@ -5,45 +5,46 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 #}
 {#
   Strings, lists and booleans are written with `to_json`: its output is also valid TOML for them,
-  with any quotes and backslashes escaped.
+  with any quotes and backslashes escaped. `ensure_ascii=False` keeps characters outside the Basic Multilingual Plane
+  (e.g. emoji) from being escaped as UTF-16 surrogate pairs, which TOML does not allow.
   See: https://docs.gitlab.com/runner/configuration/advanced-configuration/
 #}
 concurrent = {{ gitlab_runner_config_concurrent | int }}
 check_interval = {{ gitlab_runner_config_check_interval | int }}
-log_level = {{ gitlab_runner_config_log_level | to_json }}
-log_format = {{ gitlab_runner_config_log_format | to_json }}
-{% if gitlab_runner_config_metrics_enabled | bool %}
-listen_address = ":9252"
-{% endif %}
+log_level = {{ gitlab_runner_config_log_level | to_json(ensure_ascii=False) }}
+log_format = {{ gitlab_runner_config_log_format | to_json(ensure_ascii=False) }}
 {% if gitlab_runner_configuration_extension_toml | trim | length > 0 %}
 {{ gitlab_runner_configuration_extension_toml | trim }}
 {% endif %}
 {% for runner in gitlab_runner_runners %}
 
 [[runners]]
-  name = {{ runner.name | to_json }}
-  url = {{ runner.url | default(gitlab_runner_config_gitlab_url) | to_json }}
+  name = {{ runner.name | to_json(ensure_ascii=False) }}
+  url = {{ runner.url | default(gitlab_runner_config_gitlab_url) | to_json(ensure_ascii=False) }}
 {% if runner.clone_url | default(gitlab_runner_config_gitlab_clone_url) | length > 0 %}
-  clone_url = {{ runner.clone_url | default(gitlab_runner_config_gitlab_clone_url) | to_json }}
+  clone_url = {{ runner.clone_url | default(gitlab_runner_config_gitlab_clone_url) | to_json(ensure_ascii=False) }}
 {% endif %}
-  token = {{ runner.token | to_json }}
+  token = {{ runner.token | to_json(ensure_ascii=False) }}
   executor = "docker"
   limit = {{ runner.limit | default(0) | int }}
   request_concurrency = {{ runner.request_concurrency | default(gitlab_runner_runners_default_request_concurrency) | int }}
 {% if runner.environment | default([]) | length > 0 %}
-  environment = {{ runner.environment | to_json }}
+  environment = {{ runner.environment | to_json(ensure_ascii=False) }}
+{% endif %}
+{#
+  Before `[runners.docker]`, so that plain keys in it belong to the runner rather than to that table.
+#}
+{% if runner.configuration_extension_toml | default('') | trim | length > 0 %}
+  {{ runner.configuration_extension_toml | trim | indent(2) }}
 {% endif %}
   [runners.docker]
-    image = {{ runner.docker_image | default(gitlab_runner_runners_default_docker_image) | to_json }}
+    image = {{ runner.docker_image | default(gitlab_runner_runners_default_docker_image) | to_json(ensure_ascii=False) }}
     privileged = {{ runner.docker_privileged | default(gitlab_runner_runners_default_docker_privileged) | bool | to_json }}
-    volumes = {{ runner.docker_volumes | default(gitlab_runner_runners_default_docker_volumes) | to_json }}
+    volumes = {{ runner.docker_volumes | default(gitlab_runner_runners_default_docker_volumes) | to_json(ensure_ascii=False) }}
 {% if runner.docker_network_mode | default('') | length > 0 %}
-    network_mode = {{ runner.docker_network_mode | to_json }}
+    network_mode = {{ runner.docker_network_mode | to_json(ensure_ascii=False) }}
 {% endif %}
 {% if runner.docker_configuration_extension_toml | default('') | trim | length > 0 %}
     {{ runner.docker_configuration_extension_toml | trim | indent(4) }}
-{% endif %}
-{% if runner.configuration_extension_toml | default('') | trim | length > 0 %}
-  {{ runner.configuration_extension_toml | trim | indent(2) }}
 {% endif %}
 {% endfor %}
