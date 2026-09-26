@@ -1,0 +1,27 @@
+# SPDX-FileCopyrightText: 2023 Slavi Pantaleev
+# SPDX-FileCopyrightText: 2026 spatterlight
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+---
+- name: Perform GitLab Runner installation tasks
+  when: gitlab_runner_enabled | bool
+  tags:
+    - setup-all
+    - setup-gitlab-runner
+    - install-all
+    - install-gitlab-runner
+  block:
+    - name: Validate GitLab Runner configuration
+      ansible.builtin.include_tasks: "{{ role_path }}/tasks/validate_config.yml"
+    - name: Install GitLab Runner
+      ansible.builtin.include_tasks: "{{ role_path }}/tasks/install.yml"
+
+- name: Perform GitLab Runner uninstallation tasks
+  when: not gitlab_runner_enabled | bool
+  tags:
+    - setup-all
+    - setup-gitlab-runner
+  block:
+    - name: Uninstall GitLab Runner
+      ansible.builtin.include_tasks: "{{ role_path }}/tasks/uninstall.yml"

@@ -1,0 +1,76 @@
+{#
+SPDX-FileCopyrightText: 2023 Slavi Pantaleev
+SPDX-FileCopyrightText: 2024 Nikita Chernyi
+SPDX-FileCopyrightText: 2025 Suguru Hirahara
+SPDX-FileCopyrightText: 2026 spatterlight
+
+SPDX-License-Identifier: AGPL-3.0-or-later
+#}
+
+[Unit]
+Description=GitLab Runner ({{ gitlab_runner_identifier }})
+{% for service in gitlab_runner_systemd_required_services_list %}
+Requires={{ service }}
+After={{ service }}
+{% endfor %}
+{% for service in gitlab_runner_systemd_wanted_services_list %}
+Wants={{ service }}
+{% endfor %}
+DefaultDependencies=no
+
+[Service]
+Type=simple
+Environment="HOME={{ devture_systemd_docker_base_systemd_unit_home_path }}"
+ExecStartPre={{ devture_systemd_docker_base_host_command_sh }} -c '{{ gitlab_runner_container_cleanup_command | trim | replace("\n", " ") }}'
+
+{#
+  The runner only talks to GitLab and to the Docker daemon (via its socket), so it runs as an unprivileged user,
+  without any capabilities and with a read-only filesystem. The group that owns the Docker socket lets it use the socket,
+  which is equivalent to `root` access on the host: the containers of its jobs are started next to this one,
+  by the host's Docker daemon.
+
+  The image's default command runs as the `gitlab-runner` user of the image, and works in its home directory,
+  which is not writable for `gitlab_runner_uid`. Neither is needed with the Docker executor.
+
+  On SIGQUIT, GitLab Runner stops picking up new jobs and waits for the running ones to finish.
+#}
+ExecStartPre={{ devture_systemd_docker_base_host_command_docker }} create \
+      --rm \
+      --name={{ gitlab_runner_identifier }} \
+      --log-driver=none \
+      --user={{ gitlab_runner_uid }}:{{ gitlab_runner_gid }} \
+      --group-add={{ gitlab_runner_container_docker_socket_gid_effective }} \
+      --cap-drop=ALL \
+      --security-opt=no-new-privileges \
+      --read-only \
+      --tmpfs=/tmp:rw,noexec,nosuid,size=16m \
+      --network={{ gitlab_runner_container_network }} \
+      --stop-signal=SIGQUIT \
+      {% if gitlab_runner_config_metrics_enabled and gitlab_runner_container_metrics_host_bind_port %}
+      -p {{ gitlab_runner_container_metrics_host_bind_port }}:9252 \
+      {% endif %}
+      --mount type=bind,src={{ gitlab_runner_config_path }},dst=/etc/gitlab-runner \
+      --mount type=bind,src={{ gitlab_runner_container_docker_socket_path_host }},dst=/var/run/docker.sock \
+      {% for arg in gitlab_runner_container_extra_arguments %}
+      {{ arg }} \
+      {% endfor %}
+      {{ gitlab_runner_container_image }} \
+      run --config=/etc/gitlab-runner/config.toml --working-directory=/tmp
+
+{% for network in gitlab_runner_container_additional_networks %}
+ExecStartPre={{ devture_systemd_docker_base_host_command_docker }} network connect {{ network }} {{ gitlab_runner_identifier }}
+{% endfor %}
+
+ExecStart={{ devture_systemd_docker_base_host_command_docker }} start --attach {{ gitlab_runner_identifier }}
+
+ExecStop=-{{ devture_systemd_docker_base_host_command_sh }} -c '{{ devture_systemd_docker_base_host_command_docker }} stop -t {{ gitlab_runner_container_stop_grace_time_seconds }} {{ gitlab_runner_identifier }} 2>/dev/null || true'
+ExecStop=-{{ devture_systemd_docker_base_host_command_sh }} -c '{{ devture_systemd_docker_base_host_command_docker }} rm {{ gitlab_runner_identifier }} 2>/dev/null || true'
+
+{# Leave enough time for `docker stop` above to finish gracefully, before systemd kills it. #}
+TimeoutStopSec={{ gitlab_runner_container_stop_grace_time_seconds | int + 30 }}
+Restart=always
+RestartSec=30
+SyslogIdentifier={{ gitlab_runner_identifier }}
+
+[Install]
+WantedBy=multi-user.target

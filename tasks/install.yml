@@ -1,0 +1,110 @@
+# SPDX-FileCopyrightText: 2023 - 2025 Slavi Pantaleev
+# SPDX-FileCopyrightText: 2025 Suguru Hirahara
+# SPDX-FileCopyrightText: 2026 spatterlight
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+---
+- name: Ensure GitLab Runner paths exist
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    mode: "{{ item.mode }}"
+    owner: "{{ gitlab_runner_uid }}"
+    group: "{{ gitlab_runner_gid }}"
+  with_items:
+    - { path: "{{ gitlab_runner_base_path }}", mode: "0750" }
+    # GitLab Runner writes `.runner_system_id` in here on its first start.
+    - { path: "{{ gitlab_runner_config_path }}", mode: "0700" }
+
+- name: Ensure GitLab Runner container image is pulled via community.docker.docker_image_pull
+  when: devture_systemd_docker_base_container_image_pull_method == 'ansible-module'
+  community.docker.docker_image_pull:
+    name: "{{ gitlab_runner_container_image }}"
+    pull: always
+  register: gitlab_runner_container_image_pull_result_ansible_module
+  retries: "{{ devture_playbook_help_container_retries_count }}"
+  delay: "{{ devture_playbook_help_container_retries_delay }}"
+  until: gitlab_runner_container_image_pull_result_ansible_module is not failed
+
+- name: Ensure GitLab Runner container image is pulled via ansible.builtin.command
+  when: devture_systemd_docker_base_container_image_pull_method == 'command'
+  ansible.builtin.command:
+    cmd: "{{ devture_systemd_docker_base_host_command_docker }} pull {{ gitlab_runner_container_image }}"
+  register: gitlab_runner_container_image_pull_result_command
+  retries: "{{ devture_playbook_help_container_retries_count }}"
+  delay: "{{ devture_playbook_help_container_retries_delay }}"
+  until: gitlab_runner_container_image_pull_result_command is not failed
+  changed_when: "'Downloaded newer image' in gitlab_runner_container_image_pull_result_command.stdout"
+
+# GitLab Runner reloads this file on its own when it changes, so it's not a reason to restart the container.
+# It contains the runner authentication tokens, so only the runner's user may read it.
+- name: Ensure GitLab Runner configuration installed
+  ansible.builtin.template:
+    src: "{{ role_path }}/templates/config.toml.j2"
+    dest: "{{ gitlab_runner_config_path }}/config.toml"
+    mode: "0600"
+    owner: "{{ gitlab_runner_uid }}"
+    group: "{{ gitlab_runner_gid }}"
+
+- name: Determine the group that owns the Docker socket
+  when: gitlab_runner_container_docker_socket_gid | string | length == 0
+  block:
+    - name: Check the Docker socket
+      ansible.builtin.stat:
+        path: "{{ gitlab_runner_container_docker_socket_path_host }}"
+      register: gitlab_runner_container_docker_socket_stat
+
+    - name: Fail if the Docker socket does not exist
+      ansible.builtin.fail:
+        msg: >-
+          The Docker socket (`{{ gitlab_runner_container_docker_socket_path_host }}`) does not exist.
+          Set gitlab_runner_container_docker_socket_path_host to its path.
+      when: not gitlab_runner_container_docker_socket_stat.stat.exists or not gitlab_runner_container_docker_socket_stat.stat.issock
+
+- name: Determine the group the GitLab Runner container runs with to use the Docker socket
+  ansible.builtin.set_fact:
+    gitlab_runner_container_docker_socket_gid_effective: >-
+      {{
+        gitlab_runner_container_docker_socket_gid
+        if gitlab_runner_container_docker_socket_gid | string | length > 0
+        else gitlab_runner_container_docker_socket_stat.stat.gid
+      }}
+
+- name: Ensure GitLab Runner container network is created via community.docker.docker_network
+  when: devture_systemd_docker_base_container_network_creation_method == 'ansible-module'
+  community.docker.docker_network:
+    enable_ipv6: "{{ devture_systemd_docker_base_ipv6_enabled }}"
+    name: "{{ gitlab_runner_container_network }}"
+    driver: bridge
+    driver_options: "{{ devture_systemd_docker_base_container_networks_driver_options }}"
+
+- name: Ensure GitLab Runner container network is created via ansible.builtin.command
+  when: devture_systemd_docker_base_container_network_creation_method == 'command'
+  ansible.builtin.command:
+    cmd: >-
+      {{ devture_systemd_docker_base_host_command_docker }} network create
+      {% if devture_systemd_docker_base_ipv6_enabled %}--ipv6{% endif %}
+      {{ devture_systemd_docker_base_container_networks_driver_options_string }}
+      {{ gitlab_runner_container_network }}
+  register: gitlab_runner_network_creation_result
+  changed_when: gitlab_runner_network_creation_result.rc == 0
+  failed_when: gitlab_runner_network_creation_result.rc != 0 and 'already exists' not in gitlab_runner_network_creation_result.stderr
+
+- name: Ensure GitLab Runner systemd service is present
+  ansible.builtin.template:
+    src: "{{ role_path }}/templates/systemd/gitlab-runner.service.j2"
+    dest: "{{ devture_systemd_docker_base_systemd_path }}/{{ gitlab_runner_identifier }}.service"
+    mode: "0644"
+  register: gitlab_runner_systemd_service_result
+
+# Restarting waits for the running jobs to finish (see `gitlab_runner_container_stop_grace_time_seconds`),
+# so it's avoided when only `config.toml` changed, which GitLab Runner reloads on its own.
+- name: Determine whether GitLab Runner needs a restart
+  ansible.builtin.set_fact:
+    gitlab_runner_restart_necessary: >-
+      {{
+        gitlab_runner_systemd_service_result.changed | default(false)
+        or gitlab_runner_container_image_pull_result_ansible_module.changed | default(false)
+        or gitlab_runner_container_image_pull_result_command.changed | default(false)
+      }}
