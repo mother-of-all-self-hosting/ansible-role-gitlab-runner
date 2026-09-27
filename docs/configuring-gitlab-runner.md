@@ -19,7 +19,7 @@ The runner's container gets the host's Docker socket, and starts the containers 
 >[!WARNING]
 > Access to the Docker socket is equivalent to `root` access on the host. The runner's container itself runs as an unprivileged user, without capabilities and with a read-only filesystem, but anyone who can make GitLab Runner start containers can take over the host, and so can the jobs of a runner with `docker_privileged: true`.
 >
-> Run the runner on a host of its own (not the one running GitLab or other services), and only let it run jobs you trust.
+> Only let the runner run jobs you trust.
 
 The role writes GitLab Runner's `config.toml` itself, from the runners you define. It does not run `gitlab-runner register`.
 
