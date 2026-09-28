@@ -144,7 +144,7 @@ A privileged job container has `root` access to the host. Where possible, build 
 
 ### Using a GitLab instance on the same host (optional)
 
-If GitLab (e.g. installed with [ansible-role-gitlab](https://github.com/spatterIight/ansible-role-gitlab)) runs on the same host, the runner can use its public URL as usual.
+If GitLab (e.g. installed with [ansible-role-gitlab](https://github.com/mother-of-all-self-hosting/ansible-role-gitlab)) runs on the same host, the runner can use its public URL as usual.
 
 To reach it through its container network instead (e.g. because the public URL isn't reachable from the host itself), connect the runner and its job containers to that network, and point them at the container:
 
