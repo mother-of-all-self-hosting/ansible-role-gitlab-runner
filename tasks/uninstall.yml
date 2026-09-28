@@ -44,9 +44,9 @@
           changed_when: gitlab_runner_network_deletion_result.rc == 0
           failed_when: gitlab_runner_network_deletion_result.rc != 0 and 'not found' not in gitlab_runner_network_deletion_result.stderr
 
-# Everything in here is generated (by this role, or by GitLab Runner itself), so there is no data to keep.
-# The runners stay registered in GitLab, and can be deleted there.
-- name: Ensure GitLab Runner paths do not exist
-  ansible.builtin.file:
-    path: "{{ gitlab_runner_base_path }}"
-    state: absent
+    # Everything in here is generated (by this role, or by GitLab Runner itself), so there is no data to keep.
+    # The runners stay registered in GitLab, and can be deleted there.
+    - name: Ensure GitLab Runner paths do not exist
+      ansible.builtin.file:
+        path: "{{ gitlab_runner_base_path }}"
+        state: absent
