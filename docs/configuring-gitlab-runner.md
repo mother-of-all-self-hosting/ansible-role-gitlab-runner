@@ -12,6 +12,11 @@ GitLab Runner runs the CI/CD jobs of a GitLab instance. This role supports the [
 
 See the project's [documentation](https://docs.gitlab.com/runner/) to learn what GitLab Runner does and why it might be useful to you.
 
+>[!NOTE]
+> It uses GitLab's official [container image](https://docs.gitlab.com/runner/install/docker/) (`gitlab/gitlab-runner`), and supports the [Docker executor](https://docs.gitlab.com/runner/executors/docker/) only. Jobs run in containers next to the runner's own, on the host's Docker daemon (via its socket).
+>
+> For other executors, operating systems or autoscaling, see [riemers/ansible-gitlab-runner](https://github.com/riemers/ansible-gitlab-runner), which installs GitLab Runner from its packages.
+
 ## How it works
 
 The runner's container gets the host's Docker socket, and starts the containers of its jobs through it. They run next to the runner's container (not inside it), on the host's Docker daemon, just as with a GitLab Runner installed from a package. This is the setup GitLab [documents](https://docs.gitlab.com/runner/install/docker/) for running GitLab Runner in a container.
@@ -189,10 +194,6 @@ The container is stopped with SIGQUIT, on which GitLab Runner stops picking up n
 The role restarts the container only when the container image (e.g. a new GitLab Runner version) or the systemd service changes, not when only `config.toml` changes.
 
 GitLab recommends keeping the major and minor version of GitLab Runner in sync with that of GitLab. Other combinations may work, but some features may not. See [this page](https://docs.gitlab.com/runner/#gitlab-runner-versions) for details. To pin another version, set `gitlab_runner_version` (e.g. `gitlab_runner_version: 19.3.3`).
-
-## Uninstalling
-
-Setting `gitlab_runner_enabled: false` stops the service and removes its files (`gitlab_runner_base_path`). The runners stay in GitLab, and can be deleted there.
 
 ## Troubleshooting
 
