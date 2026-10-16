@@ -21,7 +21,7 @@ gitlab_runner_base_path: "/{{ gitlab_runner_identifier }}"
 gitlab_runner_config_path: "{{ gitlab_runner_base_path }}/config"
 
 # renovate: datasource=docker depName=gitlab/gitlab-runner versioning=semver
-gitlab_runner_version: 19.4.1
+gitlab_runner_version: 19.5.0
 
 # The user and group that the container runs as, and which own the files this role manages on the host.
 gitlab_runner_uid: ""
