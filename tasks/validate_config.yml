@@ -12,7 +12,6 @@
   with_items:
     - gitlab_runner_uid
     - gitlab_runner_gid
-    - gitlab_runner_container_network
     - gitlab_runner_container_docker_socket_path_host
 
 - name: Fail if no GitLab runners are defined
